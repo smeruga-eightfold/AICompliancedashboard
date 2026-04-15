@@ -996,6 +996,368 @@ Below 80% does not block the study but results should be interpreted with cautio
     st.stop()
 
 
+
+# ████████████████████████████████████████████████████
+# █  AI INTERVIEWER                                    █
+# ████████████████████████████████████████████████████
+elif page=="AI Interviewer":
+    st.markdown('<div class="pt">AI Interviewer</div>',unsafe_allow_html=True)
+
+    AI_ROLES=["Engineering","Sales","Operations","Marketing","Finance"]
+    AI_ITYPES=["Screening","Technical","Behavioral"]
+    AI_EXPS=["Entry","Mid","Senior"]
+    AI_GEOS=["US","India","Europe"]
+    AI_LANGS=["English","Hindi","Spanish","French","German"]
+    AI_GENDERS=["Female","Male"]
+    AI_RACES=["White","Black","Asian","Hispanic","Other"]
+    AI_ACCENTS=["Native","Non-native"]
+    AI_OUTCOMES=["Selected","Rejected","Pending"]
+
+    # Score generation parameters (realistic, causal)
+    ROLE_BASE={"Engineering":0.88,"Finance":0.85,"Operations":0.83,"Marketing":0.80,"Sales":0.77}
+    EXP_ADJ__={"Entry":-0.04,"Mid":0.03,"Senior":-0.01}
+    GEO_ADJ__={"US":0.02,"India":-0.01,"Europe":0.0}
+    ITYPE_ADJ={"Screening":0.02,"Technical":-0.01,"Behavioral":0.01}
+    # Slight bias for perturbation/IR realism
+    GENDER_ADJ__={"Female":0.005,"Male":-0.003}
+    RACE_ADJ__={"White":0.0,"Black":-0.008,"Asian":0.003,"Hispanic":-0.006,"Other":-0.004}
+    ACCENT_ADJ={"Native":0.005,"Non-native":-0.008}
+
+    @st.cache_data
+    def gen_ai_data(seed=88):
+        rng=np.random.default_rng(seed);n=60000;recs=[]
+        for i in range(n):
+            role=rng.choice(AI_ROLES);itype=rng.choice(AI_ITYPES);exp=rng.choice(AI_EXPS)
+            geo=rng.choice(AI_GEOS);lang=rng.choice(AI_LANGS)
+            gen=rng.choice(AI_GENDERS,p=[0.43,0.57]);race=rng.choice(AI_RACES,p=[0.35,0.15,0.22,0.16,0.12])
+            accent=rng.choice(AI_ACCENTS,p=[0.6,0.4])
+            base=ROLE_BASE[role]+EXP_ADJ__[exp]+GEO_ADJ__[geo]+ITYPE_ADJ[itype]
+            # Interview metrics
+            coverage=float(np.clip(base+rng.normal(0,0.06),0.5,1.0))
+            clarity=float(np.clip(base+0.02+rng.normal(0,0.05),0.5,1.0))
+            resume_rel=float(np.clip(base-0.01+rng.normal(0,0.06),0.5,1.0))
+            compliance=float(np.clip(0.95+rng.normal(0,0.03),0.7,1.0))
+            # Feedback metrics
+            accuracy=float(np.clip(base+0.01+rng.normal(0,0.05),0.5,1.0))
+            completeness=float(np.clip(base-0.02+rng.normal(0,0.06),0.5,1.0))
+            evidence=float(np.clip(base+rng.normal(0,0.05),0.5,1.0))
+            # AI score (for IR/perturbation)
+            ai_score=float(np.clip(base+GENDER_ADJ__[gen]+RACE_ADJ__[race]+ACCENT_ADJ[accent]+rng.normal(0,0.08),0.3,1.0))
+            sel_prob=float(np.clip(ai_score-0.15+rng.normal(0,0.1),0.1,0.9))
+            outcome=rng.choice(["Selected","Rejected","Pending"],p=[sel_prob*0.5,0.9-sel_prob*0.5,0.1])
+            # Perturbation: small noise, mostly <1% diff
+            pert_score=float(ai_score+rng.normal(0,0.005)*rng.choice([1,1,1,1,2]))  # rare larger shifts
+            pert_score=float(np.clip(pert_score,0.3,1.0))
+            ts=datetime(2024,1,1)+timedelta(days=int(rng.integers(0,730)))
+            recs.append({"role":role,"itype":itype,"exp":exp,"geo":geo,"lang":lang,
+                "gender":gen,"race":race,"accent":accent,"outcome":outcome,
+                "coverage":round(coverage,4),"clarity":round(clarity,4),"resume_rel":round(resume_rel,4),
+                "compliance":round(compliance,4),"accuracy":round(accuracy,4),
+                "completeness":round(completeness,4),"evidence":round(evidence,4),
+                "ai_score":round(ai_score,4),"pert_score":round(pert_score,4),"ts":ts})
+        return pd.DataFrame(recs)
+
+    def color_val(v):
+        if v>=0.90:return "🟢"
+        if v>=0.75:return "🟡"
+        return "🔴"
+
+    # ── Filters ──
+    st.markdown('<div class="st_">Filters</div>',unsafe_allow_html=True)
+    today=datetime.today().date()
+    a1,a2,a3,a4=st.columns(4)
+    with a1:st.markdown('<div class="fl">From</div>',unsafe_allow_html=True);aif=st.date_input("x",value=today-timedelta(days=365),max_value=today,label_visibility="collapsed",key="aif")
+    with a2:st.markdown('<div class="fl">To</div>',unsafe_allow_html=True);ait=st.date_input("x",value=today,max_value=today,label_visibility="collapsed",key="ait")
+    with a3:st.markdown('<div class="fl">Role / Job Category</div>',unsafe_allow_html=True);air=st.multiselect("x",AI_ROLES,default=None,placeholder="All",label_visibility="collapsed",key="air");air=air or AI_ROLES
+    with a4:st.markdown('<div class="fl">Interview Type</div>',unsafe_allow_html=True);aiit=st.multiselect("x",AI_ITYPES,default=None,placeholder="All",label_visibility="collapsed",key="aiit");aiit=aiit or AI_ITYPES
+    a5,a6,a7,a8=st.columns(4)
+    with a5:st.markdown('<div class="fl">Experience Level</div>',unsafe_allow_html=True);aie=st.multiselect("x",AI_EXPS,default=None,placeholder="All",label_visibility="collapsed",key="aie");aie=aie or AI_EXPS
+    with a6:st.markdown('<div class="fl">Geography</div>',unsafe_allow_html=True);aig=st.multiselect("x",AI_GEOS,default=None,placeholder="All",label_visibility="collapsed",key="aig");aig=aig or AI_GEOS
+    with a7:st.markdown('<div class="fl">Language</div>',unsafe_allow_html=True);ail=st.multiselect("x",AI_LANGS,default=None,placeholder="All",label_visibility="collapsed",key="ail");ail=ail or AI_LANGS
+    with a8:st.markdown('<div class="fl">Outcome</div>',unsafe_allow_html=True);aio=st.multiselect("x",AI_OUTCOMES,default=None,placeholder="All",label_visibility="collapsed",key="aio");aio=aio or AI_OUTCOMES
+
+    if not(aif and ait and aif<=ait):st.warning("Please select a valid time range.");st.stop()
+    st.markdown("")
+    if st.button("Check AI Interview Quality",type="primary",key="ai_go"):st.session_state["ai_ok"]=True
+    if not st.session_state.get("ai_ok"):st.caption("Configure filters and click Check AI Interview Quality.");st.stop()
+
+    # Filter data
+    with st.spinner("Analyzing AI interviewer data…"):
+        full=gen_ai_data()
+        sd_=datetime.combine(aif,datetime.min.time());ed_=datetime.combine(ait,datetime.max.time())
+        df=full[(full["ts"]>=sd_)&(full["ts"]<=ed_)&(full["role"].isin(air))&(full["itype"].isin(aiit))&
+                (full["exp"].isin(aie))&(full["geo"].isin(aig))&(full["lang"].isin(ail))&(full["outcome"].isin(aio))]
+
+    n_ai=len(df)
+    st.markdown("---")
+    st.caption(f"{n_ai:,} interviews analyzed  ·  {aif.strftime('%b %d, %Y')} – {ait.strftime('%b %d, %Y')}")
+    if n_ai==0:st.error("No data for selected filters.");st.stop()
+
+    # ── 3 Tabs ──
+    tab1,tab2,tab3=st.tabs(["AI Interview Quality","Impact Ratio Study","Perturbation Study"])
+
+    # ═══════════════════════════
+    # TAB 1: INTERVIEW QUALITY
+    # ═══════════════════════════
+    with tab1:
+        bd=st.selectbox("Breakdown",["Overall","Role","Interview Type","Experience","Geography"],key="ai_bd")
+        seg_map_={"Overall":None,"Role":"role","Interview Type":"itype","Experience":"exp","Geography":"geo"}
+        sc=seg_map_[bd]
+
+        # Table 1: Interview Conduct
+        st.markdown('<div class="st_">Interview Conduct Quality</div>',unsafe_allow_html=True)
+        if sc:
+            grps=df.groupby(sc)
+        else:
+            grps=[("Overall",df)]
+        t1_rows=[]
+        for name,g in grps:
+            cov=g["coverage"].mean();cla=g["clarity"].mean();rr=g["resume_rel"].mean();comp=g["compliance"].mean()
+            overall=(cov+cla+rr+comp)/4
+            t1_rows.append({"Segment":name,"# Interviews":len(g),
+                "Interview Completeness":f"{color_val(cov)} {cov:.2f}","Question Quality":f"{color_val(cla)} {cla:.2f}",
+                "Candidate Relevance":f"{color_val(rr)} {rr:.2f}","Safety Compliance":f"{color_val(comp)} {comp:.2f}",
+                "Overall":f"{color_val(overall)} {overall:.2f}","_cov":cov,"_comp":comp})
+        t1=pd.DataFrame(t1_rows)
+        st.dataframe(t1[["Segment","# Interviews","Interview Completeness","Question Quality","Candidate Relevance","Safety Compliance","Overall"]],use_container_width=True,hide_index=True)
+
+        # Alerts for Table 1
+        for _,r in t1.iterrows():
+            if r["_cov"]<0.75:st.error(f"🚨 **{r['Segment']}** — Interview completeness is low ({r['_cov']:.2f}). Interviews may be incomplete.")
+            if r["_comp"]<0.90:st.error(f"🚨 **{r['Segment']}** — Safety compliance is low ({r['_comp']:.2f}). Potential legal risk. Contact AI Engineering.")
+
+        # Table 2: Feedback Quality
+        st.markdown('<div class="st_">Feedback Quality</div>',unsafe_allow_html=True)
+        t2_rows=[]
+        for name,g in (df.groupby(sc) if sc else [("Overall",df)]):
+            acc=g["accuracy"].mean();cmp=g["completeness"].mean();ev=g["evidence"].mean()
+            overall2=(acc+cmp+ev)/3
+            t2_rows.append({"Segment":name,"# Interviews":len(g),
+                "Accuracy of Evaluation":f"{color_val(acc)} {acc:.2f}","Completeness of Feedback":f"{color_val(cmp)} {cmp:.2f}",
+                "Evidence Support":f"{color_val(ev)} {ev:.2f}","Overall":f"{color_val(overall2)} {overall2:.2f}","_acc":acc})
+        t2=pd.DataFrame(t2_rows)
+        st.dataframe(t2[["Segment","# Interviews","Accuracy of Evaluation","Completeness of Feedback","Evidence Support","Overall"]],use_container_width=True,hide_index=True)
+
+        for _,r in t2.iterrows():
+            if r["_acc"]<0.75:st.error(f"🚨 **{r['Segment']}** — Evaluation accuracy is low ({r['_acc']:.2f}). AI feedback may be unreliable.")
+
+        st.caption("🟢 ≥ 0.90 (Excellent)  ·  🟡 0.75–0.90 (Acceptable)  ·  🔴 < 0.75 (Needs Attention)")
+
+        # Chart: stacked quality metrics
+        st.markdown('<div class="st_">Quality Overview</div>',unsafe_allow_html=True)
+        metrics_names=["Coverage","Clarity","Resume Rel.","Compliance","Accuracy","Completeness","Evidence"]
+        metrics_vals=[df["coverage"].mean(),df["clarity"].mean(),df["resume_rel"].mean(),df["compliance"].mean(),
+                      df["accuracy"].mean(),df["completeness"].mean(),df["evidence"].mean()]
+        mc=["#0d904f" if v>=0.90 else "#f9ab00" if v>=0.75 else "#ea4335" for v in metrics_vals]
+        fig_q=go.Figure(go.Bar(x=metrics_names,y=metrics_vals,marker_color=mc,
+            text=[f"{v:.2f}" for v in metrics_vals],textposition="outside",textfont=dict(size=11)))
+        fig_q.update_layout(yaxis=dict(range=[0,1.08],gridcolor="#f1f3f4"),height=320,margin=dict(l=40,r=20,t=15,b=60),
+            plot_bgcolor="#fff",paper_bgcolor="#fff",font=dict(family="DM Sans",color="#202124",size=12))
+        st.plotly_chart(fig_q,use_container_width=True)
+
+    # ═══════════════════════════
+    # TAB 2: IMPACT RATIO
+    # ═══════════════════════════
+    with tab2:
+        ai_demo=st.radio("Demographic View",["Gender","Race","Accent"],horizontal=True,key="ai_demo")
+        dcol=ai_demo.lower()
+        g=df.groupby(dcol).agg(n=("ai_score","size"),avg_score=("ai_score","mean"),n_sel=("outcome",lambda x:(x=="Selected").sum())).reset_index()
+        g["sel_rate"]=(g["n_sel"]/g["n"]).round(3)
+        baseline=g["sel_rate"].max()
+        g["_ir"]=(g["sel_rate"]/baseline).round(3)
+        g["Fairness Status"]=g["_ir"].apply(lambda x:"🟢 Fair" if x>=0.80 else "🔴 Potential Bias")
+        g["_fail"]=g["_ir"]<0.80
+
+        st.markdown('<div class="st_">Fairness Across Groups</div>',unsafe_allow_html=True)
+        disp_ir=g.rename(columns={dcol:"Group","n":"# Candidates","avg_score":"Avg AI Score","sel_rate":"Selection Rate"})
+        disp_ir["# Candidates"]=disp_ir["# Candidates"].apply(lambda x:f"{x:,}")
+        disp_ir["Avg AI Score"]=disp_ir["Avg AI Score"].apply(lambda x:f"{x:.3f}")
+        disp_ir["Selection Rate"]=disp_ir["Selection Rate"].apply(lambda x:f"{x:.3f}")
+        st.dataframe(disp_ir[["Group","# Candidates","Avg AI Score","Selection Rate","Fairness Status"]],use_container_width=True,hide_index=True)
+
+        for _,r in g[g["_fail"]].iterrows():
+            st.error(f"🚨 **{r[dcol]}** — Potential bias detected. Selection rate significantly lower than baseline. Please review AI interviewer fairness.")
+
+        st.caption("🟢 Fair = Impact Ratio ≥ 0.80  ·  🔴 Potential Bias = IR < 0.80")
+
+        # Chart
+        st.markdown('<div class="st_">Selection Rate by Group</div>',unsafe_allow_html=True)
+        bc__=["#0d904f" if not f else "#ea4335" for f in g["_fail"]]
+        fig_ir=go.Figure(go.Bar(x=g[dcol],y=g["sel_rate"],marker_color=bc__,
+            text=[f"{v:.1%}" for v in g["sel_rate"]],textposition="outside",textfont=dict(size=11)))
+        fig_ir.update_layout(yaxis=dict(tickformat=".0%",gridcolor="#f1f3f4",range=[0,g["sel_rate"].max()*1.2]),
+            height=320,margin=dict(l=50,r=20,t=15,b=60),plot_bgcolor="#fff",paper_bgcolor="#fff",
+            font=dict(family="DM Sans",color="#202124",size=12))
+        st.plotly_chart(fig_ir,use_container_width=True)
+
+    # ═══════════════════════════
+    # TAB 3: PERTURBATION
+    # ═══════════════════════════
+    with tab3:
+        ai_pcat=st.radio("Perturbation Category",["Gender","Race","Accent"],horizontal=True,key="ai_pcat")
+
+        # Stability table (sample of individual records)
+        sample=df.sample(n=min(200,len(df)),random_state=42)
+        sample["diff"]=(sample["pert_score"]-sample["ai_score"]).round(5)
+        sample["abs_diff"]=sample["diff"].abs()
+        sample["Stability"]=sample["abs_diff"].apply(lambda x:"🟢 Stable" if x<0.005 else "🟡 Acceptable" if x<0.01 else "🔴 Risk")
+
+        st.markdown('<div class="st_">Stability of Evaluation (Sample)</div>',unsafe_allow_html=True)
+        stbl=sample[["role",ai_pcat.lower(),"ai_score","pert_score","diff","Stability"]].copy()
+        stbl.columns=["Role","What Changed","Original Score","New Score","Difference","Stability"]
+        stbl["Original Score"]=stbl["Original Score"].apply(lambda x:f"{x:.4f}")
+        stbl["New Score"]=stbl["New Score"].apply(lambda x:f"{x:.4f}")
+        stbl["Difference"]=stbl["Difference"].apply(lambda x:f"{x:.5f}")
+        st.dataframe(stbl.head(50),use_container_width=True,hide_index=True)
+
+        # Summary table
+        st.markdown('<div class="st_">Summary by Category</div>',unsafe_allow_html=True)
+        cats=df[ai_pcat.lower()].unique()
+        sum_rows=[]
+        for c in sorted(cats):
+            cd=df[df[ai_pcat.lower()]==c]
+            diffs=(cd["pert_score"]-cd["ai_score"]).abs()
+            avg_d=diffs.mean();n_tests=len(cd)
+            # Internal: compute t-test for alerts
+            from math import erfc,sqrt
+            m1,m2=cd["ai_score"].mean(),cd["pert_score"].mean()
+            s1,s2=cd["ai_score"].std(ddof=1),cd["pert_score"].std(ddof=1)
+            sp2=((n_tests-1)*s1**2+(n_tests-1)*s2**2)/(2*n_tests-2) if n_tests>1 else 0
+            t_=abs((m1-m2)/sqrt(sp2*(2/n_tests))) if sp2>0 and n_tests>1 else 0
+            p_=float(erfc(t_/sqrt(2))) if t_>0 else 1.0
+            pct_diff=abs(m1-m2)/m1*100 if m1>0 else 0
+            stab="🟢 Stable" if avg_d<0.005 else "🟡 Acceptable" if avg_d<0.01 else "🔴 Risk"
+            alert_=pct_diff>1 or p_<0.05 or t_>2
+            sum_rows.append({"Category":c,"# Tests":n_tests,"Avg Difference":f"{avg_d:.5f}","Stability":stab,"_alert":alert_})
+        sdf=pd.DataFrame(sum_rows)
+        st.dataframe(sdf[["Category","# Tests","Avg Difference","Stability"]],use_container_width=True,hide_index=True)
+
+        for _,r in sdf[sdf["_alert"]].iterrows():
+            st.error(f"🚨 **{r['Category']}** — Potential issue detected. Please review AI interviewer stability for this group.")
+
+        st.caption("🟢 Stable (diff < 0.5%)  ·  🟡 Acceptable (0.5–1%)  ·  🔴 Risk (> 1%)")
+
+        # Chart: original vs perturbed
+        st.markdown('<div class="st_">Original vs Perturbed Scores</div>',unsafe_allow_html=True)
+        comp_data=[]
+        for c in sorted(cats):
+            cd=df[df[ai_pcat.lower()]==c]
+            comp_data.append({"Group":c,"Original":cd["ai_score"].mean(),"Perturbed":cd["pert_score"].mean()})
+        comp_df=pd.DataFrame(comp_data)
+        fig_p=go.Figure()
+        fig_p.add_trace(go.Bar(name="Original",x=comp_df["Group"],y=comp_df["Original"],marker_color="#1a73e8",
+            text=[f"{v:.3f}" for v in comp_df["Original"]],textposition="outside"))
+        fig_p.add_trace(go.Bar(name="Perturbed",x=comp_df["Group"],y=comp_df["Perturbed"],
+            marker_color=["#0d904f" if abs(o-p)<0.005 else "#f9ab00" if abs(o-p)<0.01 else "#ea4335" for o,p in zip(comp_df["Original"],comp_df["Perturbed"])],
+            text=[f"{v:.3f}" for v in comp_df["Perturbed"]],textposition="outside"))
+        fig_p.update_layout(barmode="group",yaxis=dict(gridcolor="#f1f3f4",
+            range=[float(comp_df[["Original","Perturbed"]].min().min())-0.05,float(comp_df[["Original","Perturbed"]].max().max())+0.05]),
+            height=340,margin=dict(l=50,r=20,t=15,b=60),plot_bgcolor="#fff",paper_bgcolor="#fff",
+            font=dict(family="DM Sans",color="#202124",size=12),legend=dict(orientation="h",y=1.05,x=0.5,xanchor="center"))
+        st.plotly_chart(fig_p,use_container_width=True)
+
+    st.markdown("---")
+
+    # ── Downloads ──
+    st.markdown('<div class="st_">Downloads</div>',unsafe_allow_html=True)
+    def ai_report_pdf():
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
+        from reportlab.lib.colors import HexColor
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,HRFlowable
+        buf=BytesIO();doc=SimpleDocTemplate(buf,pagesize=A4,leftMargin=25*mm,rightMargin=25*mm,topMargin=25*mm,bottomMargin=20*mm)
+        sty=getSampleStyleSheet();bl=HexColor("#1a73e8");dk=HexColor("#202124");gr__=HexColor("#5f6368");lt=HexColor("#f8f9fa")
+        ti=ParagraphStyle("T",parent=sty["Title"],fontSize=20,textColor=dk,spaceAfter=4)
+        h1=ParagraphStyle("H1",parent=sty["Heading1"],fontSize=14,textColor=bl,spaceBefore=18,spaceAfter=8)
+        bd_=ParagraphStyle("B",parent=sty["Normal"],fontSize=10,textColor=dk,leading=15,spaceAfter=8)
+        bu=ParagraphStyle("Bu",parent=bd_,leftIndent=18,bulletIndent=6,spaceAfter=4)
+        s=[Spacer(1,20),Paragraph("AI Interviewer — Quality Report",ti),
+           HRFlowable(width="100%",thickness=1,color=bl,spaceAfter=14)]
+        s.append(Paragraph(f"Period: {aif} to {ait}. Interviews: {n_ai:,}.",bd_))
+        s.append(Paragraph("1. Interview Conduct Quality",h1))
+        s.append(Paragraph(f"Average completeness: {df['coverage'].mean():.2f}. Question quality: {df['clarity'].mean():.2f}. Candidate relevance: {df['resume_rel'].mean():.2f}. Safety compliance: {df['compliance'].mean():.2f}.",bd_))
+        s.append(Paragraph("2. Feedback Quality",h1))
+        s.append(Paragraph(f"Evaluation accuracy: {df['accuracy'].mean():.2f}. Completeness: {df['completeness'].mean():.2f}. Evidence support: {df['evidence'].mean():.2f}.",bd_))
+        s.append(Paragraph("3. Fairness (Impact Ratio)",h1))
+        for dcol_ in ["gender","race","accent"]:
+            g_=df.groupby(dcol_).agg(n=("ai_score","size"),ns=("outcome",lambda x:(x=="Selected").sum())).reset_index()
+            g_["sr"]=(g_["ns"]/g_["n"]);ref_=g_["sr"].max();g_["ir_"]=(g_["sr"]/ref_)
+            fails_=g_[g_["ir_"]<0.80]
+            if len(fails_)>0:
+                for __,f_ in fails_.iterrows():
+                    s.append(Paragraph(f"&bull; <b>{f_[dcol_]}</b> ({dcol_.title()}): potential bias (IR={f_['ir_']:.3f})",bu,bulletText=""))
+            else:
+                s.append(Paragraph(f"&bull; {dcol_.title()}: all groups fair.",bu,bulletText=""))
+        s.append(Paragraph("4. Perturbation Stability",h1))
+        avg_diff_=abs(df["pert_score"]-df["ai_score"]).mean()
+        s.append(Paragraph(f"Average score difference: {avg_diff_:.5f}. {'Stable overall.' if avg_diff_<0.005 else 'Some instability detected.'}",bd_))
+        doc.build(s);buf.seek(0);return buf.getvalue()
+
+    def ai_method_pdf():
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
+        from reportlab.lib.colors import HexColor
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle,HRFlowable
+        buf=BytesIO();doc=SimpleDocTemplate(buf,pagesize=A4,leftMargin=25*mm,rightMargin=25*mm,topMargin=25*mm,bottomMargin=20*mm)
+        sty=getSampleStyleSheet();bl=HexColor("#1a73e8");dk=HexColor("#202124");gr__=HexColor("#5f6368");lt=HexColor("#f8f9fa")
+        ti=ParagraphStyle("T",parent=sty["Title"],fontSize=20,textColor=dk,spaceAfter=4)
+        h1=ParagraphStyle("H1",parent=sty["Heading1"],fontSize=14,textColor=bl,spaceBefore=18,spaceAfter=8)
+        bd_=ParagraphStyle("B",parent=sty["Normal"],fontSize=10,textColor=dk,leading=15,spaceAfter=8)
+        bu=ParagraphStyle("Bu",parent=bd_,leftIndent=18,bulletIndent=6,spaceAfter=4)
+        s=[Spacer(1,20),Paragraph("AI Interviewer — Methodology",ti),
+           HRFlowable(width="100%",thickness=1,color=bl,spaceAfter=14)]
+        s.append(Paragraph("1. Interview Conduct Metrics",h1))
+        for m,d in [("Interview Completeness","Measures whether the AI covered all required interview sections."),
+                     ("Question Quality","Assesses clarity and relevance of questions asked."),
+                     ("Candidate Relevance","Checks if questions align with the candidate's resume and experience."),
+                     ("Safety Compliance","Monitors for policy violations, inappropriate content, and jailbreak attempts.")]:
+            s.append(Paragraph(f"<b>{m}</b> — {d}",bu,bulletText="\u2022"))
+        s.append(Paragraph("2. Feedback Quality Metrics",h1))
+        for m,d in [("Accuracy of Evaluation","Is the AI's assessment factually correct?"),
+                     ("Completeness of Feedback","Does the feedback cover all evaluated areas?"),
+                     ("Evidence Support","Are assessments backed by specific candidate responses?")]:
+            s.append(Paragraph(f"<b>{m}</b> — {d}",bu,bulletText="\u2022"))
+        s.append(Paragraph("3. Scoring",h1))
+        s.append(Paragraph("\u2265 0.90 = Excellent (Green). 0.75-0.90 = Acceptable (Yellow). &lt; 0.75 = Needs Attention (Red).",bd_))
+        s.append(Paragraph("4. Impact Ratio (Fairness)",h1))
+        s.append(Paragraph("Selection rates are compared across demographic groups. Impact Ratio = group rate / highest rate. IR &lt; 0.80 indicates potential bias per the 4/5ths rule.",bd_))
+        s.append(Paragraph("5. Perturbation (Stability)",h1))
+        s.append(Paragraph("Each interview is re-evaluated with a small change to a protected characteristic. If the AI score changes significantly, it indicates the system is sensitive to that attribute.",bd_))
+        s.append(Paragraph("Internally, statistical tests (T-test, p-value) determine significance. These are not shown to the user. Instead, results are presented as Stable/Acceptable/Risk.",bd_))
+        td_=[["Difference","Stability"],["< 0.5%","\u2265 Stable"],["0.5-1%","Acceptable"],["> 1%","Risk"]]
+        t_=Table(td_,colWidths=[80,150])
+        t_.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),bl),("TEXTCOLOR",(0,0),(-1,0),HexColor("#fff")),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),9.5),
+            ("ALIGN",(0,0),(-1,-1),"CENTER"),("GRID",(0,0),(-1,-1),0.5,HexColor("#e0e0e0")),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[HexColor("#fff"),lt]),
+            ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
+        s.append(t_)
+        doc.build(s);buf.seek(0);return buf.getvalue()
+
+    d1,d2=st.columns(2)
+    with d1:
+        with st.spinner("Generating report…"):rp_=ai_report_pdf()
+        st.download_button("⬇ Download Report (PDF)",rp_,file_name="ai_interview_report.pdf",mime="application/pdf",use_container_width=True,key="aid1")
+    with d2:
+        with st.spinner("Generating methodology…"):mt_=ai_method_pdf()
+        st.download_button("⬇ Download Methodology (PDF)",mt_,file_name="ai_interview_methodology.pdf",mime="application/pdf",use_container_width=True,key="aid2")
+
+    with st.expander("How AI Interview Quality is Measured"):
+        st.markdown("""
+**Interview Conduct** — Evaluates completeness, question quality, candidate relevance, and safety compliance of each AI interview.
+
+**Feedback Quality** — Assesses whether the AI's evaluation is accurate, complete, and backed by evidence from candidate responses.
+
+**Fairness (Impact Ratio)** — Compares selection rates across gender, race, and accent groups. IR < 0.80 = potential bias.
+
+**Stability (Perturbation)** — Tests whether small changes to protected characteristics change the AI's score. Stable = scores don't change. Risk = significant change detected.
+
+**Scoring:** 🟢 ≥ 0.90 Excellent · 🟡 0.75–0.90 Acceptable · 🔴 < 0.75 Needs Attention
+""")
+    st.stop()
+
 # ████████████████████████████████████████████████████
 # █  RECOMMENDATION QUALITY                            █
 # ████████████████████████████████████████████████████
